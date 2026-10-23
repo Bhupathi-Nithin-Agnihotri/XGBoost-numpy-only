@@ -10,8 +10,7 @@ n_estimators = 100
 
 
 class Node:
-    def __init__(self, value=None, feature=None, threshold=None,
-                 left=None, right=None):
+    def __init__(self, value=None, feature=None, threshold=None, left=None, right=None):
         self.value = value
         self.feature = feature
         self.threshold = threshold
@@ -67,18 +66,20 @@ class XGBoostScratch:
                 if HL < min_child_weight or HR < min_child_weight:
                     continue
 
-                gain = 0.5 * (
-                    GL**2 / (HL + Lambda)
-                    + GR**2 / (HR + Lambda)
-                    - G**2 / (H + Lambda)
-                ) - gamma
+                gain = (
+                    0.5
+                    * (
+                        GL**2 / (HL + Lambda)
+                        + GR**2 / (HR + Lambda)
+                        - G**2 / (H + Lambda)
+                    )
+                    - gamma
+                )
 
                 if gain > best_gain:
                     best_gain = gain
                     best_feature = feature
-                    best_threshold = (
-                        x_sorted[i] + x_sorted[i + 1]
-                    ) / 2.0
+                    best_threshold = (x_sorted[i] + x_sorted[i + 1]) / 2.0
 
         # No beneficial split exists
         if best_feature is None:
@@ -86,18 +87,11 @@ class XGBoostScratch:
 
         mask = X[:, best_feature] <= best_threshold
 
-        left = self._build_tree(
-            X[mask], grad[mask], hess[mask], depth + 1
-        )
-        right = self._build_tree(
-            X[~mask], grad[~mask], hess[~mask], depth + 1
-        )
+        left = self._build_tree(X[mask], grad[mask], hess[mask], depth + 1)
+        right = self._build_tree(X[~mask], grad[~mask], hess[~mask], depth + 1)
 
         return Node(
-            feature=best_feature,
-            threshold=best_threshold,
-            left=left,
-            right=right
+            feature=best_feature, threshold=best_threshold, left=left, right=right
         )
 
     def _predict_tree_row(self, node, x):
@@ -109,9 +103,7 @@ class XGBoostScratch:
         return node.value
 
     def _predict_tree(self, tree, X):
-        return np.array([
-            self._predict_tree_row(tree, row) for row in X
-        ])
+        return np.array([self._predict_tree_row(tree, row) for row in X])
 
     def fit(self, X, y):
         X = np.asarray(X, dtype=float)
