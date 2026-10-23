@@ -43,7 +43,7 @@ class XGBoostScratch:
 
         n_samples, n_features = X.shape
 
-        # Try every feature and every valid threshold
+        # Try every feature and evaluate all thresholds using vectorized NumPy
         for feature in range(n_features):
             order = np.argsort(X[:, feature])
             x_sorted = X[order, feature]
@@ -53,33 +53,45 @@ class XGBoostScratch:
             G_prefix = np.cumsum(g_sorted)
             H_prefix = np.cumsum(h_sorted)
 
-            for i in range(n_samples - 1):
-                # Equal feature values cannot be separated
-                if x_sorted[i] == x_sorted[i + 1]:
-                    continue
+            # Candidate positions where adjacent feature values differ
+            positions = np.flatnonzero(x_sorted[:-1] != x_sorted[1:])
 
-                GL = G_prefix[i]
-                HL = H_prefix[i]
-                GR = G - GL
-                HR = H - HL
+            if positions.size == 0:
+                continue
 
-                if HL < min_child_weight or HR < min_child_weight:
-                    continue
+            GL = G_prefix[positions]
+            HL = H_prefix[positions]
+            GR = G - GL
+            HR = H - HL
 
-                gain = (
-                    0.5
-                    * (
-                        GL**2 / (HL + Lambda)
-                        + GR**2 / (HR + Lambda)
-                        - G**2 / (H + Lambda)
-                    )
-                    - gamma
+            # Enforce minimum child weight
+            valid = (HL >= min_child_weight) & (HR >= min_child_weight)
+
+            if not np.any(valid):
+                continue
+
+            # Calculate split gains for all valid thresholds at once
+            gains = (
+                0.5 * (
+                    GL**2 / (HL + Lambda)
+                    + GR**2 / (HR + Lambda)
+                    - G**2 / (H + Lambda)
                 )
+                - gamma
+            )
 
-                if gain > best_gain:
-                    best_gain = gain
-                    best_feature = feature
-                    best_threshold = (x_sorted[i] + x_sorted[i + 1]) / 2.0
+            gains[~valid] = -np.inf
+
+            best_idx = np.argmax(gains)
+            gain = gains[best_idx]
+
+            if gain > best_gain:
+                pos = positions[best_idx]
+                best_gain = gain
+                best_feature = feature
+                best_threshold = (
+                    x_sorted[pos] + x_sorted[pos + 1]
+                ) / 2.0
 
         # No beneficial split exists
         if best_feature is None:
@@ -94,16 +106,27 @@ class XGBoostScratch:
             feature=best_feature, threshold=best_threshold, left=left, right=right
         )
 
-    def _predict_tree_row(self, node, x):
-        while not node.is_leaf():
-            if x[node.feature] <= node.threshold:
-                node = node.left
-            else:
-                node = node.right
-        return node.value
-
     def _predict_tree(self, tree, X):
-        return np.array([self._predict_tree_row(tree, row) for row in X])
+        X = np.asarray(X, dtype=float)
+        predictions = np.empty(X.shape[0], dtype=float)
+        stack = [(tree, np.arange(X.shape[0]))]
+
+        while stack:
+            node, indices = stack.pop()
+
+            if indices.size == 0:
+                continue
+
+            if node.is_leaf():
+                predictions[indices] = node.value
+                continue
+
+            go_left = X[indices, node.feature] <= node.threshold
+
+            stack.append((node.right, indices[~go_left]))
+            stack.append((node.left, indices[go_left]))
+
+        return predictions
 
     def fit(self, X, y):
         X = np.asarray(X, dtype=float)
